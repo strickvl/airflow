@@ -19,9 +19,9 @@ from __future__ import annotations
 
 import json
 import warnings
+from functools import cached_property
 from typing import Any, Sequence
 
-from airflow.compat.functools import cached_property
 from airflow.models import BaseOperator
 from airflow.providers.slack.hooks.slack import SlackHook
 from airflow.utils.log.secrets_masker import mask_secret
