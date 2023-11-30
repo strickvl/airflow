@@ -90,9 +90,11 @@ def patch_pool(
     # Only slots can be modified in 'default_pool'
     try:
         if pool_name == Pool.DEFAULT_POOL_NAME and request_dict["name"] != Pool.DEFAULT_POOL_NAME:
-            if update_mask and len(update_mask) == 1 and update_mask[0].strip() == "slots":
-                pass
-            else:
+            if (
+                not update_mask
+                or len(update_mask) != 1
+                or update_mask[0].strip() != "slots"
+            ):
                 raise BadRequest(detail="Default Pool's name can't be modified")
     except KeyError:
         pass
@@ -123,8 +125,9 @@ def patch_pool(
 
     else:
         required_fields = {"name", "slots"}
-        fields_diff = required_fields - set(get_json_request_dict().keys())
-        if fields_diff:
+        if fields_diff := required_fields - set(
+            get_json_request_dict().keys()
+        ):
             raise BadRequest(detail=f"Missing required property(ies): {sorted(fields_diff)}")
 
     for key, value in patch_body.items():
@@ -138,8 +141,7 @@ def patch_pool(
 def post_pool(*, session: Session = NEW_SESSION) -> APIResponse:
     """Create a pool."""
     required_fields = {"name", "slots"}  # Pool would require both fields in the post request
-    fields_diff = required_fields - set(get_json_request_dict().keys())
-    if fields_diff:
+    if fields_diff := required_fields - set(get_json_request_dict().keys()):
         raise BadRequest(detail=f"Missing required property(ies): {sorted(fields_diff)}")
 
     try:

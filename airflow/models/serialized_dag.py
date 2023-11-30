@@ -275,10 +275,7 @@ class SerializedDagModel(Base):
     @classmethod
     @provide_session
     def get_dag(cls, dag_id: str, session: Session = NEW_SESSION) -> SerializedDAG | None:
-        row = cls.get(dag_id, session=session)
-        if row:
-            return row.dag
-        return None
+        return row.dag if (row := cls.get(dag_id, session=session)) else None
 
     @classmethod
     @provide_session
@@ -291,8 +288,7 @@ class SerializedDagModel(Base):
         :param dag_id: the DAG to fetch
         :param session: ORM Session
         """
-        row = session.query(cls).filter(cls.dag_id == dag_id).one_or_none()
-        if row:
+        if row := session.query(cls).filter(cls.dag_id == dag_id).one_or_none():
             return row
 
         # If we didn't find a matching DAG id then ask the DAG table to find

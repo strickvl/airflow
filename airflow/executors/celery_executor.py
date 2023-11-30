@@ -103,8 +103,7 @@ def execute_command(command_to_exec: CommandType) -> None:
 
 
 def _execute_in_fork(command_to_exec: CommandType, celery_task_id: str | None = None) -> None:
-    pid = os.fork()
-    if pid:
+    if pid := os.fork():
         # In parent, wait for the child
         pid, ret = os.waitpid(pid, 0)
         if ret == 0:
@@ -345,9 +344,7 @@ class CeleryExecutor(BaseExecutor):
                 self.fail(key, info)
             elif state == celery_states.STARTED:
                 pass
-            elif state == celery_states.PENDING:
-                pass
-            else:
+            elif state != celery_states.PENDING:
                 self.log.info("Unexpected state for %s: %s", key, state)
         except Exception:
             self.log.exception("Error syncing the Celery executor, ignoring it.")
@@ -432,8 +429,7 @@ class CeleryExecutor(BaseExecutor):
             readable_tis.append(repr(ti))
             task_instance_key = ti.key
             self.fail(task_instance_key, None)
-            celery_async_result = self.tasks.pop(task_instance_key, None)
-            if celery_async_result:
+            if celery_async_result := self.tasks.pop(task_instance_key, None):
                 try:
                     app.control.revoke(celery_async_result.task_id)
                 except Exception as ex:
@@ -516,8 +512,7 @@ class BulkStateFetcher(LoggingMixin):
     ) -> Mapping[str, EventBufferValueType]:
         state_info: MutableMapping[str, EventBufferValueType] = {}
         for task_id in task_ids:
-            task_result = task_results_by_task_id.get(task_id)
-            if task_result:
+            if task_result := task_results_by_task_id.get(task_id):
                 state = task_result["status"]
                 info = None if not hasattr(task_result, "info") else task_result["info"]
             else:

@@ -120,9 +120,7 @@ def _get_config_value_from_secret_backend(config_key: str) -> str | None:
     """Get Config option values from Secret Backend."""
     try:
         secrets_client = get_custom_secret_backend()
-        if not secrets_client:
-            return None
-        return secrets_client.get_config(config_key)
+        return None if not secrets_client else secrets_client.get_config(config_key)
     except Exception as e:
         raise AirflowConfigException(
             "Cannot retrieve config from alternative secrets backend. "
@@ -336,9 +334,9 @@ class AirflowConfigParser(ConfigParser):
         self.airflow_defaults = ConfigParser(*args, **kwargs)
         if default_config is not None:
             self.airflow_defaults.read_string(default_config)
-            # Set the upgrade value based on the current loaded default
-            default = self.airflow_defaults.get("logging", "log_filename_template", fallback=None)
-            if default:
+            if default := self.airflow_defaults.get(
+                "logging", "log_filename_template", fallback=None
+            ):
                 replacement = self.deprecated_values["logging"]["log_filename_template"]
                 self.deprecated_values["logging"]["log_filename_template"] = (
                     replacement[0],
@@ -391,7 +389,7 @@ class AirflowConfigParser(ConfigParser):
             # handled by deprecated_values
             pass
         elif old_value.find("airflow.api.auth.backend.session") == -1:
-            new_value = old_value + ",airflow.api.auth.backend.session"
+            new_value = f"{old_value},airflow.api.auth.backend.session"
             self._update_env_var(section="api", name="auth_backends", new_value=new_value)
             self.upgraded_values[("api", "auth_backends")] = old_value
 
@@ -417,9 +415,9 @@ class AirflowConfigParser(ConfigParser):
         section, key = "database", "sql_alchemy_conn"
         old_value = self.get(section, key, _extra_stacklevel=1)
         bad_schemes = ["postgres+psycopg2", "postgres"]
-        good_scheme = "postgresql"
         parsed = urlsplit(old_value)
         if parsed.scheme in bad_schemes:
+            good_scheme = "postgresql"
             warnings.warn(
                 f"Bad scheme in Airflow configuration core > sql_alchemy_conn: `{parsed.scheme}`. "
                 "As of SQLAlchemy 1.4 (adopted in Airflow 2.3) this is no longer supported.  You must "
@@ -427,7 +425,11 @@ class AirflowConfigParser(ConfigParser):
                 FutureWarning,
             )
             self.upgraded_values[(section, key)] = old_value
-            new_value = re.sub("^" + re.escape(f"{parsed.scheme}://"), f"{good_scheme}://", old_value)
+            new_value = re.sub(
+                f'^{re.escape(f"{parsed.scheme}://")}',
+                f"{good_scheme}://",
+                old_value,
+            )
             self._update_env_var(section=section, name=key, new_value=new_value)
 
             # if the old value is set via env var, we need to wipe it
@@ -494,13 +496,13 @@ class AirflowConfigParser(ConfigParser):
         if env_var in os.environ:
             return expand_env_var(os.environ[env_var])
         # alternatively AIRFLOW__{SECTION}__{KEY}_CMD (for a command)
-        env_var_cmd = env_var + "_CMD"
+        env_var_cmd = f"{env_var}_CMD"
         if env_var_cmd in os.environ:
             # if this is a valid command key...
             if (section, key) in self.sensitive_config_values:
                 return run_command(os.environ[env_var_cmd])
         # alternatively AIRFLOW__{SECTION}__{KEY}_SECRET (to get from Secrets Backend)
-        env_var_secret_path = env_var + "_SECRET"
+        env_var_secret_path = f"{env_var}_SECRET"
         if env_var_secret_path in os.environ:
             # if this is a valid secret path...
             if (section, key) in self.sensitive_config_values:
@@ -508,7 +510,7 @@ class AirflowConfigParser(ConfigParser):
         return None
 
     def _get_cmd_option(self, section: str, key: str):
-        fallback_key = key + "_cmd"
+        fallback_key = f"{key}_cmd"
         if (section, key) in self.sensitive_config_values:
             if super().has_option(section, fallback_key):
                 command = super().get(section, fallback_key)
@@ -518,22 +520,19 @@ class AirflowConfigParser(ConfigParser):
     def _get_cmd_option_from_config_sources(
         self, config_sources: ConfigSourcesType, section: str, key: str
     ) -> str | None:
-        fallback_key = key + "_cmd"
+        fallback_key = f"{key}_cmd"
         if (section, key) in self.sensitive_config_values:
             section_dict = config_sources.get(section)
             if section_dict is not None:
                 command_value = section_dict.get(fallback_key)
                 if command_value is not None:
-                    if isinstance(command_value, str):
-                        command = command_value
-                    else:
-                        command = command_value[0]
+                    command = command_value if isinstance(command_value, str) else command_value[0]
                     return run_command(command)
         return None
 
     def _get_secret_option(self, section: str, key: str) -> str | None:
         """Get Config option values from Secret Backend."""
-        fallback_key = key + "_secret"
+        fallback_key = f"{key}_secret"
         if (section, key) in self.sensitive_config_values:
             if super().has_option(section, fallback_key):
                 secrets_path = super().get(section, fallback_key)
@@ -543,7 +542,7 @@ class AirflowConfigParser(ConfigParser):
     def _get_secret_option_from_config_sources(
         self, config_sources: ConfigSourcesType, section: str, key: str
     ) -> str | None:
-        fallback_key = key + "_secret"
+        fallback_key = f"{key}_secret"
         if (section, key) in self.sensitive_config_values:
             section_dict = config_sources.get(section)
             if section_dict is not None:
@@ -577,8 +576,8 @@ class AirflowConfigParser(ConfigParser):
         _extra_stacklevel: int = 0,
         **kwargs,
     ) -> str | None:
-        section = str(section).lower()
-        key = str(key).lower()
+        section = section.lower()
+        key = key.lower()
         warning_emitted = False
         deprecated_section: str | None
         deprecated_key: str | None
@@ -685,8 +684,7 @@ class AirflowConfigParser(ConfigParser):
         issue_warning: bool = True,
         extra_stacklevel: int = 0,
     ) -> str | None:
-        option = self._get_secret_option(section, key)
-        if option:
+        if option := self._get_secret_option(section, key):
             return option
         if deprecated_section and deprecated_key:
             with self.suppress_future_warnings():
@@ -706,8 +704,7 @@ class AirflowConfigParser(ConfigParser):
         issue_warning: bool = True,
         extra_stacklevel: int = 0,
     ) -> str | None:
-        option = self._get_cmd_option(section, key)
-        if option:
+        if option := self._get_cmd_option(section, key):
             return option
         if deprecated_section and deprecated_key:
             with self.suppress_future_warnings():
@@ -868,9 +865,9 @@ class AirflowConfigParser(ConfigParser):
         :raises AirflowConfigException: raised because ValueError or OverflowError
         :return: datetime.timedelta(seconds=<config_value>) or None
         """
-        val = self.get(section, key, fallback=fallback, _extra_stacklevel=1, **kwargs)
-
-        if val:
+        if val := self.get(
+            section, key, fallback=fallback, _extra_stacklevel=1, **kwargs
+        ):
             # the given value must be convertible to integer
             try:
                 int_val = int(val)
@@ -1104,8 +1101,9 @@ class AirflowConfigParser(ConfigParser):
         raw: bool,
     ):
         for section, key in self.sensitive_config_values:
-            value: str | None = self._get_secret_option_from_config_sources(config_sources, section, key)
-            if value:
+            if value := self._get_secret_option_from_config_sources(
+                config_sources, section, key
+            ):
                 if not display_sensitive:
                     value = "< hidden >"
                 if display_source:
@@ -1115,7 +1113,7 @@ class AirflowConfigParser(ConfigParser):
                 else:
                     opt = value
                 config_sources.setdefault(section, OrderedDict()).update({key: opt})
-                del config_sources[section][key + "_secret"]
+                del config_sources[section][f"{key}_secret"]
 
     def _include_commands(
         self,
@@ -1138,7 +1136,7 @@ class AirflowConfigParser(ConfigParser):
             if opt_to_set is not None:
                 dict_to_update: dict[str, str | tuple[str, str]] = {key: opt_to_set}
                 config_sources.setdefault(section, OrderedDict()).update(dict_to_update)
-                del config_sources[section][key + "_cmd"]
+                del config_sources[section][f"{key}_cmd"]
 
     def _include_envs(
         self,
@@ -1261,13 +1259,11 @@ class AirflowConfigParser(ConfigParser):
         for config_type, config in configs:
             if config_type == "default":
                 continue
-            try:
+            with suppress(NoSectionError):
                 deprecated_section_array = config.items(section=deprecated_section, raw=True)
                 for key_candidate, _ in deprecated_section_array:
                     if key_candidate == deprecated_key:
                         return True
-            except NoSectionError:
-                pass
         return False
 
     @staticmethod
@@ -1282,7 +1278,9 @@ class AirflowConfigParser(ConfigParser):
         deprecated_section: str, deprecated_key: str, configs: Iterable[tuple[str, ConfigParser]]
     ) -> bool:
         return AirflowConfigParser._deprecated_value_is_set_in_config(
-            deprecated_section=deprecated_section, deprecated_key=deprecated_key + "_cmd", configs=configs
+            deprecated_section=deprecated_section,
+            deprecated_key=f"{deprecated_key}_cmd",
+            configs=configs,
         )
 
     @staticmethod
@@ -1297,7 +1295,9 @@ class AirflowConfigParser(ConfigParser):
         deprecated_section: str, deprecated_key: str, configs: Iterable[tuple[str, ConfigParser]]
     ) -> bool:
         return AirflowConfigParser._deprecated_value_is_set_in_config(
-            deprecated_section=deprecated_section, deprecated_key=deprecated_key + "_secret", configs=configs
+            deprecated_section=deprecated_section,
+            deprecated_key=f"{deprecated_key}_secret",
+            configs=configs,
         )
 
     @staticmethod
@@ -1367,10 +1367,7 @@ class AirflowConfigParser(ConfigParser):
                         )
                     ):
                         continue
-            if display_source:
-                sect[k] = (val, source_name)
-            else:
-                sect[k] = val
+            sect[k] = (val, source_name) if display_source else val
 
     def load_test_config(self):
         """
@@ -1549,7 +1546,7 @@ def initialize_config() -> AirflowConfigParser:
 
     # Make it no longer a proxy variable, just set it to an actual string
     global WEBSERVER_CONFIG
-    WEBSERVER_CONFIG = AIRFLOW_HOME + "/webserver_config.py"
+    WEBSERVER_CONFIG = f"{AIRFLOW_HOME}/webserver_config.py"
 
     if not os.path.isfile(WEBSERVER_CONFIG):
         import shutil

@@ -285,9 +285,7 @@ class PlainXComArg(XComArg):
             xcom_pull_kwargs.append(f"key='{self.key}'")
 
         xcom_pull_str = ", ".join(xcom_pull_kwargs)
-        # {{{{ are required for escape {{ in f-string
-        xcom_pull = f"{{{{ task_instance.xcom_pull({xcom_pull_str}) }}}}"
-        return xcom_pull
+        return f"{{{{ task_instance.xcom_pull({xcom_pull_str}) }}}}"
 
     def _serialize(self) -> dict[str, Any]:
         return {"task_id": self.operator.task_id, "key": self.key}
@@ -481,9 +479,7 @@ class _ZipResult(Sequence):
 
     def __len__(self) -> int:
         lengths = (len(v) for v in self.values)
-        if isinstance(self.fillvalue, ArgNotSet):
-            return min(lengths)
-        return max(lengths)
+        return min(lengths) if isinstance(self.fillvalue, ArgNotSet) else max(lengths)
 
 
 class ZipXComArg(XComArg):
@@ -552,8 +548,7 @@ _XCOM_ARG_TYPES: Mapping[str, type[XComArg]] = {
 
 def serialize_xcom_arg(value: XComArg) -> dict[str, Any]:
     """DAG serialization interface."""
-    key = next(k for k, v in _XCOM_ARG_TYPES.items() if v == type(value))
-    if key:
+    if key := next(k for k, v in _XCOM_ARG_TYPES.items() if v == type(value)):
         return {"type": key, **value._serialize()}
     return value._serialize()
 

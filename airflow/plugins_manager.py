@@ -452,8 +452,9 @@ def integrate_executor_plugins() -> None:
             raise AirflowPluginException("Invalid plugin name")
         plugin_name: str = plugin.name
 
-        executors_module = make_module("airflow.executors." + plugin_name, plugin.executors)
-        if executors_module:
+        if executors_module := make_module(
+            f"airflow.executors.{plugin_name}", plugin.executors
+        ):
             executors_modules.append(executors_module)
             sys.modules[executors_module.__name__] = executors_module
 
@@ -481,9 +482,9 @@ def integrate_macros_plugins() -> None:
         if plugin.name is None:
             raise AirflowPluginException("Invalid plugin name")
 
-        macros_module = make_module(f"airflow.macros.{plugin.name}", plugin.macros)
-
-        if macros_module:
+        if macros_module := make_module(
+            f"airflow.macros.{plugin.name}", plugin.macros
+        ):
             macros_modules.append(macros_module)
             sys.modules[macros_module.__name__] = macros_module
             # Register the newly created module on airflow.macros such that it

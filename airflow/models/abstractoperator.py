@@ -139,10 +139,7 @@ class AbstractOperator(Templater, DAGNode):
     @property
     def dag_id(self) -> str:
         """Returns dag id if it has one or an adhoc + owner"""
-        dag = self.get_dag()
-        if dag:
-            return dag.dag_id
-        return f"adhoc_{self.owner}"
+        return dag.dag_id if (dag := self.get_dag()) else f"adhoc_{self.owner}"
 
     @property
     def node_id(self) -> str:
@@ -150,9 +147,7 @@ class AbstractOperator(Templater, DAGNode):
 
     def get_direct_relative_ids(self, upstream: bool = False) -> set[str]:
         """Get direct relative IDs to the current task, upstream or downstream."""
-        if upstream:
-            return self.upstream_task_ids
-        return self.downstream_task_ids
+        return self.upstream_task_ids if upstream else self.downstream_task_ids
 
     def get_flat_relative_ids(
         self,
@@ -181,10 +176,10 @@ class AbstractOperator(Templater, DAGNode):
 
     def get_flat_relatives(self, upstream: bool = False) -> Collection[Operator]:
         """Get a flat list of relatives, either upstream or downstream."""
-        dag = self.get_dag()
-        if not dag:
+        if dag := self.get_dag():
+            return [dag.task_dict[task_id] for task_id in self.get_flat_relative_ids(upstream)]
+        else:
             return set()
-        return [dag.task_dict[task_id] for task_id in self.get_flat_relative_ids(upstream)]
 
     def _iter_all_mapped_downstreams(self) -> Iterator[MappedOperator | MappedTaskGroup]:
         """Return mapped nodes that are direct dependencies of the current task.
@@ -280,12 +275,13 @@ class AbstractOperator(Templater, DAGNode):
         """
         if self.weight_rule == WeightRule.ABSOLUTE:
             return self.priority_weight
-        elif self.weight_rule == WeightRule.DOWNSTREAM:
+        elif (
+            self.weight_rule == WeightRule.DOWNSTREAM
+            or self.weight_rule != WeightRule.UPSTREAM
+        ):
             upstream = False
-        elif self.weight_rule == WeightRule.UPSTREAM:
-            upstream = True
         else:
-            upstream = False
+            upstream = True
         dag = self.get_dag()
         if dag is None:
             return self.priority_weight
@@ -305,7 +301,7 @@ class AbstractOperator(Templater, DAGNode):
             raise AirflowException("Can't load operators")
         for ope in plugins_manager.operator_extra_links:
             if ope.operators and self.operator_class in ope.operators:
-                op_extra_links_from_plugin.update({ope.name: ope})
+                op_extra_links_from_plugin[ope.name] = ope
 
         operator_extra_links_all = {link.name: link for link in self.operator_extra_links}
         # Extra links defined in Plugins overrides operator links defined in operator
@@ -341,8 +337,8 @@ class AbstractOperator(Templater, DAGNode):
         link: BaseOperatorLink | None = self.operator_extra_link_dict.get(link_name)
         if not link:
             link = self.global_operator_extra_link_dict.get(link_name)
-            if not link:
-                return None
+        if not link:
+            return None
 
         parameters = inspect.signature(link.get_link).parameters
         old_signature = all(name != "ti_key" for name, p in parameters.items() if p.kind != p.VAR_KEYWORD)

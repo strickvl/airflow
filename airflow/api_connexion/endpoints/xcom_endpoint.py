@@ -58,11 +58,9 @@ def get_xcom_entries(
         appbuilder = get_airflow_app().appbuilder
         readable_dag_ids = appbuilder.sm.get_readable_dag_ids(g.user)
         query = query.filter(XCom.dag_id.in_(readable_dag_ids))
-        query = query.join(DR, and_(XCom.dag_id == DR.dag_id, XCom.run_id == DR.run_id))
     else:
         query = query.filter(XCom.dag_id == dag_id)
-        query = query.join(DR, and_(XCom.dag_id == DR.dag_id, XCom.run_id == DR.run_id))
-
+    query = query.join(DR, and_(XCom.dag_id == DR.dag_id, XCom.run_id == DR.run_id))
     if task_id != "~":
         query = query.filter(XCom.task_id == task_id)
     if dag_run_id != "~":
@@ -92,11 +90,7 @@ def get_xcom_entry(
     session: Session = NEW_SESSION,
 ) -> APIResponse:
     """Get an XCom entry."""
-    if deserialize:
-        query = session.query(XCom, XCom.value)
-    else:
-        query = session.query(XCom)
-
+    query = session.query(XCom, XCom.value) if deserialize else session.query(XCom)
     query = query.filter(XCom.dag_id == dag_id, XCom.task_id == task_id, XCom.key == xcom_key)
     query = query.join(DR, and_(XCom.dag_id == DR.dag_id, XCom.run_id == DR.run_id))
     query = query.filter(DR.run_id == dag_run_id)

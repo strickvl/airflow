@@ -239,21 +239,20 @@ class DecoratedOperator(BaseOperator):
                     self.outlets.append(item)
         if not self.multiple_outputs:
             return return_value
-        if isinstance(return_value, dict):
-            for key in return_value.keys():
-                if not isinstance(key, str):
-                    raise AirflowException(
-                        "Returned dictionary keys must be strings when using "
-                        f"multiple_outputs, found {key} ({type(key)}) instead"
-                    )
-            for key, value in return_value.items():
-                if isinstance(value, Dataset):
-                    self.outlets.append(value)
-                xcom_push(context, key, value)
-        else:
+        if not isinstance(return_value, dict):
             raise AirflowException(
                 f"Returned output was type {type(return_value)} expected dictionary for multiple_outputs"
             )
+        for key in return_value.keys():
+            if not isinstance(key, str):
+                raise AirflowException(
+                    "Returned dictionary keys must be strings when using "
+                    f"multiple_outputs, found {key} ({type(key)}) instead"
+                )
+        for key, value in return_value.items():
+            if isinstance(value, Dataset):
+                self.outlets.append(value)
+            xcom_push(context, key, value)
         return return_value
 
     def _hook_apply_defaults(self, *args, **kwargs):
@@ -330,7 +329,7 @@ class _TaskDecorator(ExpandableFactory, Generic[FParams, FReturn, OperatorSubcla
         except TypeError:  # Can't evaluate return type.
             return False
         ttype = getattr(return_type, "__origin__", return_type)
-        return ttype == dict or ttype == Dict
+        return ttype in [dict, Dict]
 
     def __attrs_post_init__(self):
         if "self" in self.function_signature.parameters:

@@ -40,7 +40,7 @@ def rand_str(num):
 
 def add_pod_suffix(*, pod_name, rand_len=8, max_len=80):
     """Add random string to pod name while staying under max len."""
-    suffix = "-" + rand_str(rand_len)
+    suffix = f"-{rand_str(rand_len)}"
     return pod_name[: max_len - len(suffix)].strip("-.") + suffix
 
 

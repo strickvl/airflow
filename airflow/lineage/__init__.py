@@ -39,9 +39,7 @@ log = logging.getLogger(__name__)
 
 def get_backend() -> LineageBackend | None:
     """Gets the lineage backend if defined in the configs."""
-    clazz = conf.getimport("lineage", "backend", fallback=None)
-
-    if clazz:
+    if clazz := conf.getimport("lineage", "backend", fallback=None):
         if not issubclass(clazz, LineageBackend):
             raise TypeError(
                 f"Your custom Lineage class `{clazz.__name__}` "
@@ -137,7 +135,7 @@ def prepare_lineage(func: T) -> T:
 
             # re-instantiate the obtained inlets
             # xcom_pull returns a list of items for each given task_id
-            _inlets = [item for item in itertools.chain.from_iterable(_inlets)]
+            _inlets = list(itertools.chain.from_iterable(_inlets))
 
             self.inlets.extend(_inlets)
 

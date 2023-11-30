@@ -338,9 +338,7 @@ def _is_mappable_value(value: Any) -> TypeGuard[Collection]:
     """
     if not isinstance(value, (collections.abc.Sequence, dict)):
         return False
-    if isinstance(value, (bytearray, bytes, str)):
-        return False
-    return True
+    return not isinstance(value, (bytearray, bytes, str))
 
 
 class TaskInstanceKey(NamedTuple):
@@ -663,9 +661,8 @@ class TaskInstance(Base, LoggingMixin):
         else:
             dag = self.dag_model
 
-        should_pass_filepath = not pickle_id and dag
         path: PurePath | None = None
-        if should_pass_filepath:
+        if should_pass_filepath := not pickle_id and dag:
             if dag.is_subdag:
                 if TYPE_CHECKING:
                     assert dag.parent_dag is not None
@@ -917,10 +914,7 @@ class TaskInstance(Base, LoggingMixin):
         :param session: SQLAlchemy ORM Session
         """
         self.log.debug("Clearing XCom data")
-        if self.map_index < 0:
-            map_index: int | None = None
-        else:
-            map_index = self.map_index
+        map_index = None if self.map_index < 0 else self.map_index
         XCom.clear(
             dag_id=self.dag_id,
             task_id=self.task_id,
@@ -1019,10 +1013,7 @@ class TaskInstance(Base, LoggingMixin):
         else:
             last_dagrun = dr.get_previous_dagrun(session=session, state=state)
 
-        if last_dagrun:
-            return last_dagrun
-
-        return None
+        return last_dagrun if last_dagrun else None
 
     @provide_session
     def get_previous_ti(
@@ -1175,7 +1166,7 @@ class TaskInstance(Base, LoggingMixin):
         prefix = f"<TaskInstance: {self.dag_id}.{self.task_id} {self.run_id} "
         if self.map_index != -1:
             prefix += f"map_index={self.map_index} "
-        return prefix + f"[{self.state}]>"
+        return f"{prefix}[{self.state}]>"
 
     def next_retry_datetime(self):
         """
@@ -1195,9 +1186,7 @@ class TaskInstance(Base, LoggingMixin):
             # To address this, we impose a lower bound of 1 on min_backoff. This effectively makes
             # the ceiling function unnecessary, but the ceiling function was retained to avoid
             # introducing a breaking change.
-            if min_backoff < 1:
-                min_backoff = 1
-
+            min_backoff = max(min_backoff, 1)
             # deterministic per task instance
             ti_hash = int(
                 hashlib.sha1(
@@ -1321,8 +1310,9 @@ class TaskInstance(Base, LoggingMixin):
             # If the task continues after being deferred (next_method is set), use the original start_date
             self.start_date = self.start_date if self.next_method else timezone.utcnow()
             if self.state == State.UP_FOR_RESCHEDULE:
-                task_reschedule: TR = TR.query_for_task_instance(self, session=session).first()
-                if task_reschedule:
+                if task_reschedule := TR.query_for_task_instance(
+                    self, session=session
+                ).first():
                     self.start_date = task_reschedule.start_date
 
             # Secondly we find non-runnable but requeueable tis. We reset its state.
@@ -1394,7 +1384,7 @@ class TaskInstance(Base, LoggingMixin):
             params.append(self.map_index)
             message += "map_index=%d, "
         self.log.info(
-            message + "execution_date=%s, start_date=%s, end_date=%s",
+            f"{message}execution_date=%s, start_date=%s, end_date=%s",
             *params,
             self._date_or_empty("execution_date"),
             self._date_or_empty("start_date"),
@@ -1726,10 +1716,7 @@ class TaskInstance(Base, LoggingMixin):
         else:
             result = execute_callable(context=context)
         with create_session() as session:
-            if task_to_execute.do_xcom_push:
-                xcom_value = result
-            else:
-                xcom_value = None
+            xcom_value = result if task_to_execute.do_xcom_push else None
             if xcom_value is not None:  # If the task returns a result, push an XCom containing it.
                 self.xcom_push(key=XCOM_RETURN_KEY, value=xcom_value, session=session)
             self._record_task_map_for_downstreams(task_orig, xcom_value, session=session)
@@ -1765,10 +1752,7 @@ class TaskInstance(Base, LoggingMixin):
         else:
             self.trigger_timeout = None
 
-        # If an execution_timeout is set, set the timeout to the minimum of
-        # it and the trigger timeout
-        execution_timeout = self.task.execution_timeout
-        if execution_timeout:
+        if execution_timeout := self.task.execution_timeout:
             if self.trigger_timeout:
                 self.trigger_timeout = min(self.start_date + execution_timeout, self.trigger_timeout)
             else:
@@ -1776,8 +1760,7 @@ class TaskInstance(Base, LoggingMixin):
 
     def _run_execute_callback(self, context: Context, task: Operator) -> None:
         """Functions that need to be run before a Task is executed"""
-        callbacks = task.on_execute_callback
-        if callbacks:
+        if callbacks := task.on_execute_callback:
             callbacks = callbacks if isinstance(callbacks, list) else [callbacks]
             for callback in callbacks:
                 try:
@@ -1801,7 +1784,7 @@ class TaskInstance(Base, LoggingMixin):
         session: Session = NEW_SESSION,
     ) -> None:
         """Run TaskInstance"""
-        res = self.check_and_change_state_before_execution(
+        if res := self.check_and_change_state_before_execution(
             verbose=verbose,
             ignore_all_deps=ignore_all_deps,
             ignore_depends_on_past=ignore_depends_on_past,
@@ -1813,13 +1796,12 @@ class TaskInstance(Base, LoggingMixin):
             job_id=job_id,
             pool=pool,
             session=session,
-        )
-        if not res:
+        ):
+            self._run_raw_task(
+                mark_success=mark_success, test_mode=test_mode, job_id=job_id, pool=pool, session=session
+            )
+        else:
             return
-
-        self._run_raw_task(
-            mark_success=mark_success, test_mode=test_mode, job_id=job_id, pool=pool, session=session
-        )
 
     def dry_run(self) -> None:
         """Only Renders Templates for the TI"""
@@ -2048,27 +2030,19 @@ class TaskInstance(Base, LoggingMixin):
 
         def _get_previous_dagrun_data_interval_success() -> DataInterval | None:
             dagrun = _get_previous_dagrun_success()
-            if dagrun is None:
-                return None
-            return dag.get_run_data_interval(dagrun)
+            return None if dagrun is None else dag.get_run_data_interval(dagrun)
 
         def get_prev_data_interval_start_success() -> pendulum.DateTime | None:
             data_interval = _get_previous_dagrun_data_interval_success()
-            if data_interval is None:
-                return None
-            return data_interval.start
+            return None if data_interval is None else data_interval.start
 
         def get_prev_data_interval_end_success() -> pendulum.DateTime | None:
             data_interval = _get_previous_dagrun_data_interval_success()
-            if data_interval is None:
-                return None
-            return data_interval.end
+            return None if data_interval is None else data_interval.end
 
         def get_prev_start_date_success() -> pendulum.DateTime | None:
             dagrun = _get_previous_dagrun_success()
-            if dagrun is None:
-                return None
-            return timezone.coerce_datetime(dagrun.start_date)
+            return None if dagrun is None else timezone.coerce_datetime(dagrun.start_date)
 
         @cache
         def get_yesterday_ds() -> str:
@@ -2101,15 +2075,11 @@ class TaskInstance(Base, LoggingMixin):
 
         def get_next_ds() -> str | None:
             execution_date = get_next_execution_date()
-            if execution_date is None:
-                return None
-            return execution_date.strftime("%Y-%m-%d")
+            return None if execution_date is None else execution_date.strftime("%Y-%m-%d")
 
         def get_next_ds_nodash() -> str | None:
             ds = get_next_ds()
-            if ds is None:
-                return ds
-            return ds.replace("-", "")
+            return ds if ds is None else ds.replace("-", "")
 
         @cache
         def get_prev_execution_date():
@@ -2126,15 +2096,11 @@ class TaskInstance(Base, LoggingMixin):
         @cache
         def get_prev_ds() -> str | None:
             execution_date = get_prev_execution_date()
-            if execution_date is None:
-                return None
-            return execution_date.strftime(r"%Y-%m-%d")
+            return None if execution_date is None else execution_date.strftime(r"%Y-%m-%d")
 
         def get_prev_ds_nodash() -> str | None:
             prev_ds = get_prev_ds()
-            if prev_ds is None:
-                return None
-            return prev_ds.replace("-", "")
+            return None if prev_ds is None else prev_ds.replace("-", "")
 
         def get_triggering_events() -> dict[str, list[DatasetEvent]]:
             if TYPE_CHECKING:
@@ -2222,8 +2188,9 @@ class TaskInstance(Base, LoggingMixin):
         """
         from airflow.models.renderedtifields import RenderedTaskInstanceFields
 
-        rendered_task_instance_fields = RenderedTaskInstanceFields.get_templated_fields(self, session=session)
-        if rendered_task_instance_fields:
+        if rendered_task_instance_fields := RenderedTaskInstanceFields.get_templated_fields(
+            self, session=session
+        ):
             self.task = self.task.unmap(None)
             for field_name, rendered_value in rendered_task_instance_fields.items():
                 setattr(self.task, field_name, rendered_value)
@@ -2308,8 +2275,7 @@ class TaskInstance(Base, LoggingMixin):
             base_worker_pod=PodGenerator.deserialize_model_file(kube_config.pod_template_file),
             with_mutation_hook=True,
         )
-        sanitized_pod = ApiClient().sanitize_for_serialization(pod)
-        return sanitized_pod
+        return ApiClient().sanitize_for_serialization(pod)
 
     def get_email_subject_content(
         self, exception: BaseException, task: BaseOperator | None = None
@@ -2540,12 +2506,10 @@ class TaskInstance(Base, LoggingMixin):
         query = query.order_by(None)
         if task_ids is None or isinstance(task_ids, str):
             query = query.order_by(XCom.task_id)
+        elif task_id_whens := {tid: i for i, tid in enumerate(task_ids)}:
+            query = query.order_by(case(task_id_whens, value=XCom.task_id))
         else:
-            task_id_whens = {tid: i for i, tid in enumerate(task_ids)}
-            if task_id_whens:
-                query = query.order_by(case(task_id_whens, value=XCom.task_id))
-            else:
-                query = query.order_by(XCom.task_id)
+            query = query.order_by(XCom.task_id)
         if map_indexes is None or isinstance(map_indexes, int):
             query = query.order_by(XCom.map_index)
         elif isinstance(map_indexes, range):
@@ -2553,12 +2517,12 @@ class TaskInstance(Base, LoggingMixin):
             if map_indexes.step < 0:
                 order = order.desc()
             query = query.order_by(order)
+        elif map_index_whens := {
+            map_index: i for i, map_index in enumerate(map_indexes)
+        }:
+            query = query.order_by(case(map_index_whens, value=XCom.map_index))
         else:
-            map_index_whens = {map_index: i for i, map_index in enumerate(map_indexes)}
-            if map_index_whens:
-                query = query.order_by(case(map_index_whens, value=XCom.map_index))
-            else:
-                query = query.order_by(XCom.map_index)
+            query = query.order_by(XCom.map_index)
         return LazyXComAccess.build_from_xcom_query(query)
 
     @provide_session
@@ -2646,26 +2610,25 @@ class TaskInstance(Base, LoggingMixin):
                 dag_map_index_groups = map_index_groups[(cur_dag_id, cur_run_id)]
 
                 if len(dag_task_id_groups) <= len(dag_map_index_groups):
-                    for cur_task_id, cur_map_indices in dag_task_id_groups.items():
-                        filter_condition.append(
-                            and_(
-                                TaskInstance.dag_id == cur_dag_id,
-                                TaskInstance.run_id == cur_run_id,
-                                TaskInstance.task_id == cur_task_id,
-                                TaskInstance.map_index.in_(cur_map_indices),
-                            )
+                    filter_condition.extend(
+                        and_(
+                            TaskInstance.dag_id == cur_dag_id,
+                            TaskInstance.run_id == cur_run_id,
+                            TaskInstance.task_id == cur_task_id,
+                            TaskInstance.map_index.in_(cur_map_indices),
                         )
+                        for cur_task_id, cur_map_indices in dag_task_id_groups.items()
+                    )
                 else:
-                    for cur_map_index, cur_task_ids in dag_map_index_groups.items():
-                        filter_condition.append(
-                            and_(
-                                TaskInstance.dag_id == cur_dag_id,
-                                TaskInstance.run_id == cur_run_id,
-                                TaskInstance.task_id.in_(cur_task_ids),
-                                TaskInstance.map_index == cur_map_index,
-                            )
+                    filter_condition.extend(
+                        and_(
+                            TaskInstance.dag_id == cur_dag_id,
+                            TaskInstance.run_id == cur_run_id,
+                            TaskInstance.task_id.in_(cur_task_ids),
+                            TaskInstance.map_index == cur_map_index,
                         )
-
+                        for cur_map_index, cur_task_ids in dag_map_index_groups.items()
+                    )
         return or_(*filter_condition)
 
     @classmethod

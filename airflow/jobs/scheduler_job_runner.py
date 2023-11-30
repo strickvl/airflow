@@ -430,7 +430,7 @@ class SchedulerJobRunner(BaseJobRunner, LoggingMixin):
             # TODO[HA]: This was wrong before anyway, as it only looked at a sub-set of dags, not everything.
             # Stats.gauge('scheduler.tasks.pending', len(task_instances_to_examine))
 
-            if len(task_instances_to_examine) == 0:
+            if not task_instances_to_examine:
                 self.log.debug("No tasks to consider for execution.")
                 break
 
@@ -610,7 +610,7 @@ class SchedulerJobRunner(BaseJobRunner, LoggingMixin):
         Stats.gauge("scheduler.tasks.starving", num_starving_tasks_total)
         Stats.gauge("scheduler.tasks.executable", len(executable_tis))
 
-        if len(executable_tis) > 0:
+        if executable_tis:
             task_instance_str = "\n\t".join(repr(x) for x in executable_tis)
             self.log.info("Setting the following tasks to queued state:\n\t%s", task_instance_str)
 
@@ -1540,8 +1540,9 @@ class SchedulerJobRunner(BaseJobRunner, LoggingMixin):
             .all()
         )
         try:
-            tis_for_warning_message = self.job.executor.cleanup_stuck_queued_tasks(tis=tasks_stuck_in_queued)
-            if tis_for_warning_message:
+            if tis_for_warning_message := self.job.executor.cleanup_stuck_queued_tasks(
+                tis=tasks_stuck_in_queued
+            ):
                 task_instance_str = "\n\t".join(tis_for_warning_message)
                 self.log.warning(
                     "Marked the following %s task instances stuck in queued as failed. "
@@ -1587,19 +1588,18 @@ class SchedulerJobRunner(BaseJobRunner, LoggingMixin):
                 )
                 self.log.debug("Calling SchedulerJob.adopt_or_reset_orphaned_tasks method")
                 try:
-                    num_failed = (
+                    if num_failed := (
                         session.query(Job)
                         .filter(
                             Job.job_type == "SchedulerJob",
                             Job.state == State.RUNNING,
-                            Job.latest_heartbeat < (timezone.utcnow() - timedelta(seconds=timeout)),
+                            Job.latest_heartbeat
+                            < (timezone.utcnow() - timedelta(seconds=timeout)),
                         )
                         .update({"state": State.FAILED})
-                    )
-
-                    if num_failed:
+                    ):
                         self.log.info("Marked %d SchedulerJob instances as failed", num_failed)
-                        Stats.incr(self.__class__.__name__.lower() + "_end", num_failed)
+                        Stats.incr(f"{self.__class__.__name__.lower()}_end", num_failed)
 
                     resettable_states = [TaskInstanceState.QUEUED, TaskInstanceState.RUNNING]
                     query = (
@@ -1660,7 +1660,7 @@ class SchedulerJobRunner(BaseJobRunner, LoggingMixin):
         Looks at all tasks that are in the "deferred" state and whose trigger
         or execution timeout has passed, so they can be marked as failed.
         """
-        num_timed_out_tasks = (
+        if num_timed_out_tasks := (
             session.query(TI)
             .filter(
                 TI.state == TaskInstanceState.DEFERRED,
@@ -1676,8 +1676,7 @@ class SchedulerJobRunner(BaseJobRunner, LoggingMixin):
                     "trigger_id": None,
                 }
             )
-        )
-        if num_timed_out_tasks:
+        ):
             self.log.info("Timed out %i deferred tasks without fired triggers", num_timed_out_tasks)
 
     def _find_zombies(self) -> None:

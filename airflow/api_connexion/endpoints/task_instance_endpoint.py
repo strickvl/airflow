@@ -262,9 +262,7 @@ def get_mapped_task_instances(
 
 
 def _convert_state(states: Iterable[str] | None) -> list[str | None] | None:
-    if not states:
-        return None
-    return [State.NONE if s == "none" else s for s in states]
+    return [State.NONE if s == "none" else s for s in states] if states else None
 
 
 def _apply_array_filter(query: Query, key: ClauseElement, values: Iterable[Any] | None) -> Query:
